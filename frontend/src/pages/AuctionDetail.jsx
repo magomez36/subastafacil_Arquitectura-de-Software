@@ -1,5 +1,6 @@
 
 import { useEffect, useState } from 'react';
+import BidForm from '../components/BidForm';
 import './AuctionDetail.css';
 
 const API_URL = 'http://localhost:3000/api/auctions';
@@ -185,10 +186,16 @@ function AuctionDetail({ auctionId, onBack }) {
                   </div>
                 </div>
 
-                <p className="detail-note">
-                  La participación y el envío de ofertas se implementarán
-                  en la siguiente etapa.
-                </p>
+                <BidForm
+                  auction={auction}
+                  onBidPlaced={(newPrice) =>
+                    setAuction((prev) => ({
+                      ...prev,
+                      current_price: newPrice,
+                      bids_count: Number(prev.bids_count) + 1,
+                    }))
+                  }
+                />
               </div>
             </section>
           </>
