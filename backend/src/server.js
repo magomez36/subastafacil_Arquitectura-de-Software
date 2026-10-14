@@ -7,6 +7,8 @@ const pool = require('./config/db');
 const auctionRoutes = require('./routes/auctions.routes');
 const categoryRoutes = require('./routes/categories.routes');
 const authRoutes = require('./routes/auth.routes');
+const profileRoutes = require('./routes/profile.routes');
+const bidRoutes = require('./routes/bids.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,8 +49,10 @@ app.get('/api/db-health', async (req, res) => {
 });
 
 app.use('/api/auctions', auctionRoutes);
+app.use('/api/auctions', bidRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/profile', profileRoutes);
 
 app.listen(PORT, () => {
   console.log(`Servidor disponible en http://localhost:${PORT}`);
