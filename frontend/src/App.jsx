@@ -4,8 +4,14 @@ import './App.css';
 
 import AuctionDetail from './pages/AuctionDetail.jsx';
 import AccountPanel from './components/AccountPanel.jsx';
+import Profile from './pages/Profile.jsx';
+import AuctionFilters, {
+  DEFAULT_FILTERS,
+  buildAuctionQuery,
+} from './components/AuctionFilters.jsx';
 
 const API_URL = 'http://localhost:3000/api/auctions';
+const API_CATEGORIES = 'http://localhost:3000/api/categories';
 
 function formatPrice(price) {
   return new Intl.NumberFormat('es-EC', {
@@ -28,6 +34,9 @@ function App() {
   const [error, setError] = useState('');
 
   const [selectedAuctionId, setSelectedAuctionId] = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [categories, setCategories] = useState([]);
 
   const [accountPanelOpen, setAccountPanelOpen] = useState(false);
   const [catalogVersion, setCatalogVersion] = useState(0);
@@ -45,6 +54,13 @@ function App() {
   });
 
   useEffect(() => {
+    fetch(API_CATEGORIES)
+      .then((response) => response.json())
+      .then((data) => setCategories(data.categories || []))
+      .catch(() => setCategories([]));
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadAuctions() {
@@ -52,7 +68,10 @@ function App() {
       setError('');
 
       try {
-        const response = await fetch(API_URL);
+        const query = buildAuctionQuery(filters);
+        const response = await fetch(
+          query ? `${API_URL}?${query}` : API_URL
+        );
 
         if (!response.ok) {
           throw new Error('No se pudieron cargar las subastas.');
@@ -81,7 +100,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [catalogVersion]);
+  }, [catalogVersion, filters]);
 
   function handleAuthSuccess(newToken, user) {
     localStorage.setItem('sf_token', newToken);
@@ -97,11 +116,26 @@ function App() {
 
     setToken('');
     setCurrentUser(null);
+    setProfileOpen(false);
   }
 
   function handleAuctionCreated() {
     setAccountPanelOpen(false);
     setCatalogVersion((version) => version + 1);
+  }
+
+  if (profileOpen && token) {
+    return (
+      <Profile
+        token={token}
+        user={currentUser}
+        onBack={() => setProfileOpen(false)}
+        onOpenAuction={(id) => {
+          setProfileOpen(false);
+          setSelectedAuctionId(id);
+        }}
+      />
+    );
   }
 
   if (selectedAuctionId !== null) {
@@ -131,6 +165,17 @@ function App() {
         <nav className="nav-links">
           <a href="#subastas">Explorar subastas</a>
           <a href="#como-funciona">Cómo funciona</a>
+          {token && (
+            <a
+              href="#perfil"
+              onClick={(event) => {
+                event.preventDefault();
+                setProfileOpen(true);
+              }}
+            >
+              Mi perfil
+            </a>
+          )}
         </nav>
 
         <button
@@ -176,6 +221,13 @@ function App() {
             </span>
           </div>
 
+          <AuctionFilters
+            filters={filters}
+            categories={categories}
+            onChange={setFilters}
+            onReset={() => setFilters(DEFAULT_FILTERS)}
+          />
+
           {loading && (
             <p className="status-message">Cargando subastas...</p>
           )}
@@ -184,7 +236,7 @@ function App() {
 
           {!loading && !error && auctions.length === 0 && (
             <p className="status-message">
-              No hay subastas activas en este momento.
+              No hay subastas que coincidan con tu búsqueda.
             </p>
           )}
 

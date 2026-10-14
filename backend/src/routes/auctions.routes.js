@@ -10,6 +10,81 @@ const authenticateToken = require('../middleware/auth.middleware');
 // Obtener las subastas activas
 router.get('/', async (req, res) => {
   try {
+    const { q, category_id, min_price, max_price, ending_soon, sort } = req.query;
+    const bad = (message) => res.status(400).json({ status: 'error', message });
+    const isStr = (v) => v === undefined || typeof v === 'string';
+
+    if (![q, category_id, min_price, max_price, ending_soon, sort].every(isStr)) {
+      return bad('Parámetros de búsqueda inválidos');
+    }
+
+    const params = [];
+    const where = [];
+    const having = [];
+
+    const term = (q || '').trim();
+    if (term) {
+      if (term.length > 100) return bad('La búsqueda no puede superar 100 caracteres');
+      params.push(`%${term.replace(/[\\%_]/g, '\\$&')}%`);
+      where.push(`(a.title ILIKE $${params.length} OR a.description ILIKE $${params.length})`);
+    }
+
+    if (category_id !== undefined && category_id !== '') {
+      if (!/^\d{1,15}$/.test(category_id) || Number(category_id) < 1) {
+        return bad('category_id debe ser un entero positivo');
+      }
+      params.push(category_id);
+      where.push(`a.category_id = $${params.length}`);
+    }
+
+    const parsePrice = (value, name) => {
+      if (value === undefined || value === '') return null;
+      const n = Number(value);
+      if (!/^\d+(\.\d+)?$/.test(value) || !Number.isFinite(n) || n > 1e12) {
+        bad(`${name} debe ser un número válido mayor o igual a 0`);
+        return false;
+      }
+      return n;
+    };
+    const min = parsePrice(min_price, 'min_price');
+    if (min === false) return;
+    const max = parsePrice(max_price, 'max_price');
+    if (max === false) return;
+    if (min !== null && max !== null && min > max) {
+      return bad('min_price no puede ser mayor que max_price');
+    }
+    const priceExpr = 'COALESCE(MAX(b.amount), a.starting_price)';
+    if (min !== null) {
+      params.push(min);
+      having.push(`${priceExpr} >= $${params.length}`);
+    }
+    if (max !== null) {
+      params.push(max);
+      having.push(`${priceExpr} <= $${params.length}`);
+    }
+
+    if (ending_soon !== undefined && ending_soon !== '') {
+      if (!['1', '0', 'true', 'false'].includes(ending_soon)) {
+        return bad('ending_soon debe ser 1 o 0');
+      }
+      if (ending_soon === '1' || ending_soon === 'true') {
+        where.push(`a.ends_at <= NOW() + INTERVAL '24 hours'`);
+      }
+    }
+
+    const sorts = {
+      ends_asc: 'a.ends_at ASC',
+      ends_desc: 'a.ends_at DESC',
+      price_asc: `${priceExpr} ASC, a.ends_at ASC`,
+      price_desc: `${priceExpr} DESC, a.ends_at ASC`,
+      bids_desc: 'COUNT(b.id) DESC, a.ends_at ASC',
+      newest: 'a.starts_at DESC, a.id DESC',
+    };
+    const sortKey = sort || 'ends_asc';
+    if (!Object.prototype.hasOwnProperty.call(sorts, sortKey)) {
+      return bad('sort inválido. Valores permitidos: ' + Object.keys(sorts).join(', '));
+    }
+
     const query = `
       SELECT
         a.id,
@@ -34,11 +109,13 @@ router.get('/', async (req, res) => {
       WHERE a.status = 'active'
         AND a.starts_at <= NOW()
         AND a.ends_at > NOW()
+        ${where.length ? 'AND ' + where.join(' AND ') : ''}
       GROUP BY a.id, c.name, u.full_name
-      ORDER BY a.ends_at ASC;
+      ${having.length ? 'HAVING ' + having.join(' AND ') : ''}
+      ORDER BY ${sorts[sortKey]};
     `;
 
-    const result = await pool.query(query);
+    const result = await pool.query(query, params);
 
     res.json({
       status: 'ok',

@@ -1,0 +1,103 @@
+.auction-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 16px;
+  padding: 16px 18px;
+  border: 1px solid #eae9e2;
+  border-radius: 8px;
+  background: #fffefa;
+  font-family: 'DM Sans', sans-serif;
+  color: #20251f;
+}
+
+.auction-filters .filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.auction-filters .filter-search {
+  flex: 1 1 220px;
+}
+
+.auction-filters .filter-field > span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #5d6559;
+}
+
+.auction-filters input[type='search'],
+.auction-filters input[type='number'],
+.auction-filters select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #dcdbd2;
+  border-radius: 8px;
+  background: #fff;
+  color: #20251f;
+  font: inherit;
+  font-size: 14px;
+}
+
+.auction-filters input:focus-visible,
+.auction-filters select:focus-visible,
+.auction-filters .filter-reset:focus-visible {
+  outline: 2px solid #244b38;
+  outline-offset: 1px;
+}
+
+.auction-filters .filter-price-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auction-filters .filter-price-range input {
+  width: 96px;
+}
+
+.auction-filters .filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auction-filters .filter-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: #244b38;
+}
+
+.auction-filters .filter-reset {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid #dcdbd2;
+  border-radius: 8px;
+  background: #f1f0e9;
+  color: #20251f;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auction-filters .filter-reset:hover {
+  background: #e8e7de;
+}
+
+@media (max-width: 640px) {
+  .auction-filters .filter-field,
+  .auction-filters .filter-reset {
+    flex: 1 1 100%;
+  }
+
+  .auction-filters .filter-price-range input {
+    width: 100%;
+  }
+}
