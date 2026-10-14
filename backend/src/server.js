@@ -5,6 +5,8 @@ require('dotenv').config();
 
 const pool = require('./config/db');
 const auctionRoutes = require('./routes/auctions.routes');
+const categoryRoutes = require('./routes/categories.routes');
+const authRoutes = require('./routes/auth.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -45,6 +47,8 @@ app.get('/api/db-health', async (req, res) => {
 });
 
 app.use('/api/auctions', auctionRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/auth', authRoutes);
 
 app.listen(PORT, () => {
   console.log(`Servidor disponible en http://localhost:${PORT}`);
