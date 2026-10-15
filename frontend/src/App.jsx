@@ -143,6 +143,12 @@ function App() {
       <AuctionDetail
         auctionId={selectedAuctionId}
         onBack={() => setSelectedAuctionId(null)}
+        token={token}
+        user={currentUser}
+        onAuthSuccess={handleAuthSuccess}
+        onLogout={handleLogout}
+        onOpenProfile={() => setProfileOpen(true)}
+        onAuctionCreated={handleAuctionCreated}
       />
     );
   }
@@ -201,10 +207,9 @@ function App() {
           </div>
 
           <div className="hero-decoration" aria-hidden="true">
-            <span className="decoration-circle circle-one" />
-            <span className="decoration-circle circle-two" />
-            <span className="decoration-card">Tu próxima oportunidad</span>
-            <span className="decoration-symbol">↗</span>
+            <img className="hero-product hero-product-back" src="/images/products/consola.jpg" alt="" />
+            <img className="hero-product hero-product-front" src="/images/products/camara.jpg" alt="" />
+            <span className="decoration-card"><span>DESCUBRE ALGO ÚNICO</span>Tu próxima oportunidad <b>↗</b></span>
           </div>
         </section>
 
@@ -247,9 +252,12 @@ function App() {
                   <div className="auction-image-wrapper">
                     <img
                       className="auction-image"
-                      src={auction.image_url}
+                      src={auction.image_url || '/images/producto-sin-imagen.svg'}
                       alt={auction.title}
                       loading="lazy"
+                      onError={(event) => {
+                        event.currentTarget.src = '/images/producto-sin-imagen.svg';
+                      }}
                     />
                     <span className="category-tag">
                       {auction.category}

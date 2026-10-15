@@ -124,6 +124,23 @@
   font-size: 12px;
 }
 
+.profile-item-image {
+  float: left;
+  width: 64px;
+  height: 58px;
+  margin: 0 12px 0 0;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #e9eee6;
+}
+
+.profile-item-actions { display: grid; gap: 7px; }
+.profile-item-actions button { white-space: nowrap; }
+.profile-item-actions .profile-close-auction { background: #fff4df; color: #785318; }
+.profile-item-actions .profile-close-auction:hover { background: #f4e7c9; }
+.profile-item-actions button:disabled { opacity: .6; cursor: wait; }
+.profile-success { margin-bottom: 16px; padding: 12px 15px; border-radius: 9px; background: #e6f1e4; color: #345d3b; font-size: 13px; }
+
 .profile-item-data {
   display: grid;
   gap: 3px;

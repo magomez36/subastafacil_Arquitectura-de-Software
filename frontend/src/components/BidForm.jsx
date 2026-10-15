@@ -17,21 +17,12 @@ function formatDateTime(value) {
   });
 }
 
-function getToken() {
-  try {
-    return localStorage.getItem('sf_token');
-  } catch {
-    return null;
-  }
-}
-
-function BidForm({ auction, onBidPlaced }) {
+function BidForm({ auction, onBidPlaced, token }) {
   const [bids, setBids] = useState([]);
   const [amount, setAmount] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [token] = useState(getToken);
 
   const currentPrice = Number(auction.current_price);
   const minimum =

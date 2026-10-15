@@ -5,11 +5,13 @@ const pool = require('../config/db');
 const router = express.Router();
 
 const authenticateToken = require('../middleware/auth.middleware');
+const { closeExpiredAuctions } = require('../services/auctions.service');
 
 // GET /api/auctions
 // Obtener las subastas activas
 router.get('/', async (req, res) => {
   try {
+    await closeExpiredAuctions();
     const { q, category_id, min_price, max_price, ending_soon, sort } = req.query;
     const bad = (message) => res.status(400).json({ status: 'error', message });
     const isStr = (v) => v === undefined || typeof v === 'string';
@@ -132,9 +134,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-module.exports = router;
-
-
 /**
  * GET /api/auctions/:id
  * Consultar el detalle de una subasta por su identificador.
@@ -150,6 +149,7 @@ router.get('/:id', async (req, res) => {
   }
 
   try {
+    await closeExpiredAuctions();
     const query = `
       SELECT
         a.id,
@@ -166,6 +166,14 @@ router.get('/:id', async (req, res) => {
         c.name AS category,
         u.id AS seller_id,
         u.full_name AS seller,
+        a.winner_id,
+        winner.full_name AS winner,
+        a.closed_at,
+        COALESCE(
+          (SELECT ARRAY_AGG(ai.image_url ORDER BY ai.position, ai.id)
+           FROM auction_images ai WHERE ai.auction_id = a.id),
+          ARRAY[a.image_url]
+        ) AS image_urls,
         COALESCE(MAX(b.amount), a.starting_price) AS current_price,
         COUNT(b.id)::INTEGER AS bids_count
       FROM auctions a
@@ -173,10 +181,12 @@ router.get('/:id', async (req, res) => {
         ON c.id = a.category_id
       INNER JOIN users u
         ON u.id = a.seller_id
+      LEFT JOIN users winner
+        ON winner.id = a.winner_id
       LEFT JOIN bids b
         ON b.auction_id = a.id
       WHERE a.id = $1
-      GROUP BY a.id, c.id, c.name, u.id, u.full_name;
+      GROUP BY a.id, c.id, c.name, u.id, u.full_name, winner.full_name;
     `;
 
     const result = await pool.query(query, [id]);
@@ -202,6 +212,73 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/auctions/:id/close
+ * Permite al vendedor cerrar su subasta activa y fija al mejor postor.
+ */
+router.post('/:id/close', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  if (!/^[1-9]\d*$/.test(id)) {
+    return res.status(400).json({ status: 'error', message: 'El identificador de la subasta no es válido.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `SELECT id, seller_id, status FROM auctions WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    const auction = result.rows[0];
+
+    if (!auction) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ status: 'error', message: 'La subasta no existe.' });
+    }
+    if (String(auction.seller_id) !== String(req.user.id)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ status: 'error', message: 'Solo el vendedor puede cerrar esta subasta.' });
+    }
+    if (auction.status === 'closed') {
+      await client.query('COMMIT');
+      return res.json({ status: 'ok', message: 'La subasta ya estaba cerrada.' });
+    }
+    if (auction.status !== 'active') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ status: 'error', message: 'Solo puedes cerrar una subasta activa.' });
+    }
+
+    const winner = await client.query(
+      `SELECT bidder_id, amount FROM bids
+       WHERE auction_id = $1
+       ORDER BY amount DESC, created_at ASC, id ASC
+       LIMIT 1`,
+      [id]
+    );
+    const closed = await client.query(
+      `UPDATE auctions
+       SET status = 'closed', winner_id = $2, closed_at = NOW()
+       WHERE id = $1
+       RETURNING id, title, status, winner_id, closed_at`,
+      [id, winner.rows[0]?.bidder_id || null]
+    );
+    await client.query('COMMIT');
+
+    return res.json({
+      status: 'ok',
+      message: winner.rows[0] ? 'Subasta cerrada y ganador determinado.' : 'Subasta cerrada sin ofertas.',
+      auction: closed.rows[0],
+      winning_amount: winner.rows[0]?.amount || null,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error al cerrar subasta:', error.message);
+    return res.status(500).json({ status: 'error', message: 'No se pudo cerrar la subasta.' });
+  } finally {
+    client.release();
+  }
+});
+
 
 
 /**
@@ -213,6 +290,7 @@ router.post('/', authenticateToken, async (req, res) => {
     title,
     description,
     image_url,
+    image_urls,
     category_id,
     starting_price,
     min_increment,
@@ -228,10 +306,7 @@ router.post('/', authenticateToken, async (req, res) => {
       ? description.trim()
       : '';
 
-  const cleanImageUrl =
-    typeof image_url === 'string'
-      ? image_url.trim()
-      : '';
+  const rawImages = Array.isArray(image_urls) ? image_urls : [image_url];
 
   const categoryId = Number(category_id);
   const startingPrice = Number(starting_price);
@@ -251,17 +326,28 @@ router.post('/', authenticateToken, async (req, res) => {
     });
   }
 
-  if (
-    cleanImageUrl &&
-    (
-      cleanImageUrl.length > 2048 ||
-      !/^https?:\/\/\S+$/i.test(cleanImageUrl)
-    )
-  ) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'La imagen debe tener una URL HTTP o HTTPS válida.',
-    });
+  if (rawImages.length < 1 || rawImages.length > 5) {
+    return res.status(400).json({ status: 'error', message: 'Agrega entre 1 y 5 imágenes del producto.' });
+  }
+  const cleanImages = [];
+  let totalImageBytes = 0;
+  for (const rawImage of rawImages) {
+    const value = typeof rawImage === 'string' ? rawImage.trim() : '';
+    const match = value.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/i);
+    const bytes = match ? Buffer.from(match[2], 'base64') : null;
+    const valid = match && bytes && (
+      (match[1].toLowerCase() === 'png' && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) ||
+      (match[1].toLowerCase() === 'jpeg' && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) ||
+      (match[1].toLowerCase() === 'webp' && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP')
+    );
+    if (!valid || bytes.length > 2 * 1024 * 1024) {
+      return res.status(400).json({ status: 'error', message: 'Cada foto debe ser PNG, JPG o WebP válida y pesar hasta 2 MB.' });
+    }
+    totalImageBytes += bytes.length;
+    if (totalImageBytes > 10 * 1024 * 1024) {
+      return res.status(400).json({ status: 'error', message: 'El total de las imágenes no puede superar 10 MB.' });
+    }
+    cleanImages.push(value);
   }
 
   if (!Number.isSafeInteger(categoryId) || categoryId <= 0) {
@@ -300,11 +386,12 @@ router.post('/', authenticateToken, async (req, res) => {
     Number.isNaN(startsAt.getTime()) ||
     !endsAt ||
     Number.isNaN(endsAt.getTime()) ||
-    endsAt <= startsAt
+    endsAt <= startsAt ||
+    endsAt <= new Date()
   ) {
     return res.status(400).json({
       status: 'error',
-      message: 'La fecha de finalización debe ser posterior al inicio.',
+      message: 'La fecha de finalización debe ser futura y posterior al inicio.',
     });
   }
 
@@ -324,7 +411,11 @@ router.post('/', authenticateToken, async (req, res) => {
     const status =
       startsAt > new Date() ? 'scheduled' : 'active';
 
-    const result = await pool.query(
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await client.query(
       `INSERT INTO auctions (
          seller_id,
          category_id,
@@ -356,19 +447,32 @@ router.post('/', authenticateToken, async (req, res) => {
         categoryId,
         cleanTitle,
         cleanDescription,
-        cleanImageUrl || null,
+        cleanImages[0],
         startingPrice,
         minIncrement,
         startsAt,
         endsAt,
         status,
       ]
-    );
+      );
+      for (const [index, imageUrl] of cleanImages.entries()) {
+        await client.query(
+          'INSERT INTO auction_images (auction_id, image_url, position) VALUES ($1, $2, $3)',
+          [result.rows[0].id, imageUrl, index + 1]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
 
     return res.status(201).json({
       status: 'ok',
       message: 'Subasta publicada correctamente.',
-      auction: result.rows[0],
+      auction: { ...result.rows[0], image_urls: cleanImages },
     });
   } catch (error) {
     console.error('Error al publicar subasta:', error.message);
@@ -379,4 +483,6 @@ router.post('/', authenticateToken, async (req, res) => {
     });
   }
 });
+
+module.exports = router;
 

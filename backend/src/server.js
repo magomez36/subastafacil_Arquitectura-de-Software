@@ -9,12 +9,14 @@ const categoryRoutes = require('./routes/categories.routes');
 const authRoutes = require('./routes/auth.routes');
 const profileRoutes = require('./routes/profile.routes');
 const bidRoutes = require('./routes/bids.routes');
+const initializeDatabase = require('./config/initializeDatabase');
+const { closeExpiredAuctions } = require('./services/auctions.service');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '16mb' }));
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -54,6 +56,19 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 
-app.listen(PORT, () => {
-  console.log(`Servidor disponible en http://localhost:${PORT}`);
-});
+initializeDatabase()
+  .then(() => {
+    setInterval(() => {
+      closeExpiredAuctions().catch((error) => {
+        console.error('No se pudieron cerrar las subastas vencidas:', error.message);
+      });
+    }, 60_000).unref();
+
+    app.listen(PORT, () => {
+      console.log(`Servidor disponible en http://localhost:${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error('No se pudo preparar la base de datos:', error.message);
+    process.exitCode = 1;
+  });

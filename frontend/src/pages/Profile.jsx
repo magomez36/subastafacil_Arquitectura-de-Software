@@ -60,6 +60,9 @@ function Profile({ token, user, onBack, onOpenAuction }) {
   const [loadingList, setLoadingList] = useState(true);
   const [profileError, setProfileError] = useState('');
   const [listError, setListError] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [closingId, setClosingId] = useState(null);
+  const [actionMessage, setActionMessage] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -74,7 +77,7 @@ function Profile({ token, user, onBack, onOpenAuction }) {
       });
 
     return () => controller.abort();
-  }, [token]);
+  }, [token, refreshKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -96,7 +99,29 @@ function Profile({ token, user, onBack, onOpenAuction }) {
       });
 
     return () => controller.abort();
-  }, [activeTab, token]);
+  }, [activeTab, token, refreshKey]);
+
+  async function closeAuction(auctionId) {
+    setClosingId(auctionId);
+    setLoadingList(true);
+    setActionMessage('');
+    setListError('');
+    try {
+      const response = await fetch(`http://localhost:3000/api/auctions/${auctionId}/close`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'No se pudo cerrar la subasta.');
+      setActionMessage(data.message || 'Subasta cerrada correctamente.');
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      setListError(error.message || 'No se pudo cerrar la subasta.');
+      setLoadingList(false);
+    } finally {
+      setClosingId(null);
+    }
+  }
 
   function changeTab(key) {
     if (key === activeTab) return;
@@ -144,19 +169,33 @@ function Profile({ token, user, onBack, onOpenAuction }) {
       return (
         <li key={item.id} className="profile-item">
           <div className="profile-item-main">
+            {item.image_url && <img className="profile-item-image" src={item.image_url} alt="" />}
             <h3>{item.title}</h3>
-            <p>Termina el {formatDate(item.ends_at)}</p>
+            <p>{item.status === 'closed' ? `Finalizó el ${formatDate(item.closed_at || item.ends_at)}` : `Termina el ${formatDate(item.ends_at)}`}</p>
           </div>
           <div className="profile-item-data">
             <span>Precio actual <strong>{formatPrice(item.current_price)}</strong></span>
             <span>Ofertas <strong>{item.bids_count}</strong></span>
+            {item.winner && <span>Ganador <strong>{item.winner}</strong></span>}
           </div>
           <div className="profile-item-tags">
             <span className={`profile-badge ${item.status}`}>
               {STATUS_LABELS[item.status] || item.status}
             </span>
           </div>
-          <button type="button" onClick={() => onOpenAuction(auctionId)}>Ver subasta</button>
+          <div className="profile-item-actions">
+            <button type="button" onClick={() => onOpenAuction(auctionId)}>Ver subasta</button>
+            {item.status === 'active' && (
+              <button
+                className="profile-close-auction"
+                type="button"
+                disabled={closingId === auctionId}
+                onClick={() => closeAuction(auctionId)}
+              >
+                {closingId === auctionId ? 'Cerrando…' : 'Cerrar subasta'}
+              </button>
+            )}
+          </div>
         </li>
       );
     }
@@ -220,6 +259,7 @@ function Profile({ token, user, onBack, onOpenAuction }) {
       </div>
 
       {loadingList && <p className="profile-state">Cargando información...</p>}
+      {!loadingList && actionMessage && <p className="profile-success" role="status">{actionMessage}</p>}
       {!loadingList && listError && <p className="profile-error">{listError}</p>}
       {!loadingList && !listError && items.length === 0 && (
         <p className="profile-state">{EMPTY_TEXT[activeTab]}</p>

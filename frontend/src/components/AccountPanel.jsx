@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './AccountPanel.css';
 
 const API_AUTH = 'http://localhost:3000/api/auth';
@@ -29,6 +29,8 @@ function AccountPanel({
   const [password, setPassword] = useState('');
   const [categories, setCategories] = useState([]);
   const [categoriesError, setCategoriesError] = useState('');
+  const imageInputRef = useRef(null);
+  const [productImages, setProductImages] = useState([]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -43,10 +45,6 @@ function AccountPanel({
     starts_at: localDateTime(0),
     ends_at: localDateTime(24),
   });
-
-  useEffect(() => {
-    setMode(token ? 'publish' : 'login');
-  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -100,6 +98,51 @@ function AccountPanel({
     }));
   }
 
+  function handleImageFile(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+    setError('');
+    const remaining = Math.max(0, 5 - productImages.length);
+    if (files.length > remaining) {
+      setError('Puedes agregar hasta 5 fotos por subasta.');
+      return;
+    }
+    const oversized = files.find((file) => file.size > 2 * 1024 * 1024);
+    if (oversized) {
+      setError('Cada foto puede pesar hasta 2 MB.');
+      return;
+    }
+    const unsupported = files.find((file) => !['image/jpeg', 'image/png', 'image/webp'].includes(file.type));
+    if (unsupported) {
+      setError('Las fotos deben ser PNG, JPG o WebP.');
+      return;
+    }
+    const totalBytes = [...productImages.map((item) => item.size), ...files.map((file) => file.size)]
+      .reduce((sum, size) => sum + size, 0);
+    if (totalBytes > 10 * 1024 * 1024) {
+      setError('El total de las fotos no puede superar 10 MB.');
+      return;
+    }
+    Promise.all(files.map((file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({
+        id: `${file.name}-${file.lastModified}-${Math.random()}`,
+        name: file.name,
+        size: file.size,
+        dataUrl: String(reader.result),
+        status: 'checking',
+      });
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    }))).then((items) => setProductImages((current) => [...current, ...items]))
+      .catch(() => setError('No se pudieron leer una o más fotos.'));
+  }
+
+  function updateProductImage(id, changes) {
+    setProductImages((current) => current.map((item) => item.id === id ? { ...item, ...changes } : item));
+  }
+
   async function handleAuth(event) {
     event.preventDefault();
     setError('');
@@ -142,6 +185,10 @@ function AccountPanel({
     event.preventDefault();
     setError('');
     setMessage('');
+    if (!productImages.length || productImages.some((item) => item.status !== 'ready')) {
+      setError('Agrega al menos una foto y espera a que todas las vistas previas estén listas.');
+      return;
+    }
     setSaving(true);
 
     try {
@@ -153,10 +200,12 @@ function AccountPanel({
         },
         body: JSON.stringify({
           ...auction,
+          starts_at: new Date(auction.starts_at).toISOString(),
+          ends_at: new Date(auction.ends_at).toISOString(),
           category_id: Number(auction.category_id),
           starting_price: Number(auction.starting_price),
           min_increment: Number(auction.min_increment),
-          image_url: auction.image_url.trim(),
+          image_urls: productImages.map((item) => item.dataUrl),
         }),
       });
 
@@ -333,15 +382,40 @@ function AccountPanel({
               </label>
 
               <label>
-                URL de la imagen (opcional)
+                Fotos del producto <span aria-hidden="true">· obligatorias</span>
+                <small>Agrega de 1 a 5 fotos. PNG, JPG o WebP; máximo 2 MB por foto.</small>
                 <input
-                  type="url"
-                  name="image_url"
-                  value={auction.image_url}
-                  onChange={updateAuction}
-                  placeholder="https://ejemplo.com/producto.jpg"
+                  type="file"
+                  ref={imageInputRef}
+                  accept="image/png,image/jpeg,image/webp"
+                  multiple
+                  onChange={handleImageFile}
+                  aria-label="Subir fotos del producto"
+                  aria-required="true"
                 />
               </label>
+
+              {productImages.length > 0 && (
+                <div className="product-image-gallery" aria-label="Fotos seleccionadas">
+                  {productImages.map((item, index) => (
+                    <div className="product-image-card" key={item.id}>
+                      <img
+                        src={item.dataUrl}
+                        alt={`Vista previa ${index + 1}: ${item.name}`}
+                        onLoad={() => updateProductImage(item.id, { status: 'ready' })}
+                        onError={() => updateProductImage(item.id, { status: 'invalid' })}
+                      />
+                      <span>{index === 0 ? 'Portada' : `Foto ${index + 1}`}</span>
+                      {item.status === 'checking' && <small>Preparando vista previa…</small>}
+                      {item.status === 'invalid' && <small className="image-invalid">No se pudo leer esta foto. Quítala y selecciona otra.</small>}
+                      <div className="product-image-actions">
+                        {index > 0 && <button type="button" onClick={() => setProductImages((items) => [item, ...items.filter((photo) => photo.id !== item.id)])}>Usar de portada</button>}
+                        <button type="button" aria-label={`Quitar ${item.name}`} onClick={() => setProductImages((items) => items.filter((photo) => photo.id !== item.id))}>Quitar</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <label>
                 Categoría
@@ -425,7 +499,7 @@ function AccountPanel({
 
               <button
                 className="account-submit"
-                disabled={saving || categories.length === 0}
+                disabled={saving || categories.length === 0 || productImages.length === 0 || productImages.length > 5 || productImages.some((item) => item.status !== 'ready')}
               >
                 {saving ? 'Publicando...' : 'Publicar subasta'}
               </button>
@@ -438,4 +512,3 @@ function AccountPanel({
 }
 
 export default AccountPanel;
-3
