@@ -12,6 +12,9 @@ El sistema utiliza una arquitectura cliente-servidor que separa la interfaz de u
 - **Sistema de pujas:** registro de ofertas respetando las validaciones del servidor y las reglas de la subasta.
 - **Perfil e historial del usuario:** consulta de información personal, pujas realizadas y subastas publicadas.
 - **Detalle de subasta:** visualización de la descripción, categoría, vendedor, precios, número de ofertas y fechas.
+- **Cierre y adjudicación:** el sistema cierra automáticamente las subastas vencidas y guarda como ganador al mejor postor; en caso de empate, gana la oferta más antigua. El vendedor también puede cerrar anticipadamente una subasta activa desde su perfil.
+- **Gestión de publicaciones:** consulta de subastas propias, estado, ofertas y ganador.
+- **Galería obligatoria:** cada publicación requiere de 1 a 5 fotos PNG, JPG o WebP. Se admiten hasta 2 MB por imagen y 10 MB en total; el formulario permite elegir la portada y el detalle muestra la galería. Las fotos demo locales y sus fuentes están en `frontend/public/images/products/`.
 
 ## Arquitectura del proyecto
 
@@ -82,19 +85,15 @@ database/subastafacil_schema.sql
 
 Puedes ejecutar el script mediante una herramienta gráfica compatible con PostgreSQL o utilizando `psql`.
 
-Si utilizas `psql`, y el servidor está configurado para aceptar conexiones locales con el usuario `postgres`, los comandos serían similares a los siguientes:
-
-```sql
-CREATE DATABASE subastafacil;
-```
-
-Después, conecta con la base de datos creada y ejecuta el archivo SQL desde la terminal:
+Para obtener los datos de demostración actualizados con sus fotos, prepara una base vacía. Si ya tienes una base `subastafacil` que quieras reemplazar, primero detén el backend y elimina/recrea la base desde pgAdmin; ejecutar el script sobre tablas existentes no las reinicia ni reemplaza las subastas. También puedes usar PowerShell y `psql` (ajusta el usuario y la ruta):
 
 ```powershell
-psql -U postgres -d subastafacil -f database/subastafacil_schema.sql
+psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS subastafacil WITH (FORCE);"
+psql -U postgres -d postgres -c "CREATE DATABASE subastafacil;"
+psql -U postgres -d subastafacil -f "database/subastafacil_schema.sql"
 ```
 
-Ajusta el usuario, la contraseña y los parámetros de conexión a tu instalación local. Si el script incluye datos iniciales, ejecútalo una sola vez sobre una base de datos preparada para la instalación.
+`WITH (FORCE)` requiere PostgreSQL 13 o posterior. Si no quieres borrar datos existentes, crea otra base para la demo y ejecuta allí el script. No ejecutes el comando `DROP` en una base con datos que necesites conservar. El SQL registra las portadas de las 12 subastas demo en `auction_images`; los archivos correspondientes ya están incluidos en el frontend.
 
 ### 3. Configurar las variables de entorno del backend
 
@@ -136,6 +135,8 @@ Una vez finalizada la instalación, inicia el servidor:
 npm run dev
 ```
 
+Al iniciar, el backend actualiza de forma segura las columnas necesarias para el ganador y las imágenes, y procesa las subastas que ya vencieron. Las subastas activas se revisan cada minuto para cerrarlas y determinar al ganador.
+
 Si la configuración es correcta, deberías ver un mensaje similar a:
 
 ```text
@@ -176,7 +177,9 @@ Una vez que ambos servidores estén ejecutándose, comprueba los siguientes punt
 3. El endpoint de salud de la API responde correctamente en `http://localhost:3000/api/health`.
 4. La conexión con PostgreSQL funciona y el endpoint `http://localhost:3000/api/db-health` devuelve una respuesta satisfactoria.
 5. Las subastas y categorías se cargan desde la base de datos.
-6. Puedes probar el registro, el inicio de sesión, la publicación de subastas, las búsquedas, las pujas y el perfil del usuario.
+6. Puedes probar el registro, el inicio de sesión, la publicación con carga obligatoria de imagen, las búsquedas, las pujas, el historial y la gestión de subastas propias.
+7. Para probar el cierre, publica una subasta con una fecha cercana, realiza una oferta desde otra cuenta y deja que venza; el ganador aparecerá en el detalle, en el perfil y en la pestaña **Ganadas**. El vendedor también puede cerrarla antes desde **Mi perfil → Mis subastas**.
+8. Al publicar, añade al menos una foto y hasta cinco; comprueba la portada y la galería en la vista de detalle.
 
 Los endpoints de salud permiten comprobar el estado del servidor y la conexión a la base de datos; no sustituyen las pruebas funcionales de cada módulo.
 

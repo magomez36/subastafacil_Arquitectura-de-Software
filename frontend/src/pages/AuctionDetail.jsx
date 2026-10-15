@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from 'react';
 import BidForm from '../components/BidForm';
+import AccountPanel from '../components/AccountPanel';
 import './AuctionDetail.css';
 
 const API_URL = 'http://localhost:3000/api/auctions';
@@ -25,17 +26,20 @@ function getStatusLabel(status) {
   const labels = {
     active: 'Activa',
     closed: 'Cerrada',
-    pending: 'Pendiente',
+    scheduled: 'Programada',
+    cancelled: 'Cancelada',
   };
 
   return labels[status] || status || 'No disponible';
 }
 
-function AuctionDetail({ auctionId, onBack }) {
+function AuctionDetail({ auctionId, onBack, token, user, onAuthSuccess, onLogout, onOpenProfile, onAuctionCreated }) {
   const [auction, setAuction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [imageFailed, setImageFailed] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(0);
+  const [accountOpen, setAccountOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -45,6 +49,7 @@ function AuctionDetail({ auctionId, onBack }) {
       setError('');
       setAuction(null);
       setImageFailed(false);
+      setSelectedImage(0);
 
       try {
         const response = await fetch(
@@ -92,9 +97,14 @@ function AuctionDetail({ auctionId, onBack }) {
           SubastaFácil
         </a>
 
-        <button className="detail-back-button" onClick={onBack}>
-          ← Volver al catálogo
-        </button>
+        <div className="detail-nav-actions">
+          <button className="detail-account-button" onClick={() => token ? onOpenProfile() : setAccountOpen(true)}>
+            {token ? 'Mi perfil' : 'Iniciar sesión'}
+          </button>
+          <button className="detail-back-button" onClick={onBack}>
+            ← Volver al catálogo
+          </button>
+        </div>
       </header>
 
       <main className="detail-main">
@@ -120,10 +130,10 @@ function AuctionDetail({ auctionId, onBack }) {
 
             <section className="detail-layout">
               <div className="detail-image-panel">
-                {auction.image_url && !imageFailed ? (
+                {(auction.image_urls?.[selectedImage] || auction.image_url) && !imageFailed ? (
                   <img
                     className="detail-image"
-                    src={auction.image_url}
+                    src={auction.image_urls?.[selectedImage] || auction.image_url}
                     alt={auction.title}
                     onError={() => setImageFailed(true)}
                   />
@@ -136,6 +146,22 @@ function AuctionDetail({ auctionId, onBack }) {
                 <span className="detail-category">
                   {auction.category}
                 </span>
+                {(auction.image_urls?.length || 0) > 1 && (
+                  <div className="detail-thumbnails" aria-label="Fotos del producto">
+                    {auction.image_urls.map((image, index) => (
+                      <button
+                        type="button"
+                        key={`${image}-${index}`}
+                        className={selectedImage === index ? 'selected' : ''}
+                        onClick={() => { setSelectedImage(index); setImageFailed(false); }}
+                        aria-label={`Ver foto ${index + 1}`}
+                        aria-pressed={selectedImage === index}
+                      >
+                        <img src={image} alt="" />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="detail-information">
@@ -164,6 +190,13 @@ function AuctionDetail({ auctionId, onBack }) {
                   </p>
                 </div>
 
+                {auction.status === 'closed' && (
+                  <div className="detail-winner" role="status">
+                    <strong>{auction.winner ? '🏆 Subasta adjudicada' : 'Subasta cerrada sin ofertas'}</strong>
+                    {auction.winner && <span>Ganador: {auction.winner}</span>}
+                  </div>
+                )}
+
                 <div className="detail-stats">
                   <div>
                     <span>Ofertas recibidas</span>
@@ -188,6 +221,7 @@ function AuctionDetail({ auctionId, onBack }) {
 
                 <BidForm
                   auction={auction}
+                  token={token}
                   onBidPlaced={(newPrice) =>
                     setAuction((prev) => ({
                       ...prev,
@@ -205,6 +239,23 @@ function AuctionDetail({ auctionId, onBack }) {
       <footer className="detail-footer">
         SubastaFácil · Proyecto académico de Arquitectura de Software
       </footer>
+
+      {accountOpen && (
+        <AccountPanel
+          token={token}
+          user={user}
+          onClose={() => setAccountOpen(false)}
+          onAuthSuccess={(newToken, newUser) => {
+            onAuthSuccess(newToken, newUser);
+            setAccountOpen(false);
+          }}
+          onLogout={onLogout}
+          onAuctionCreated={() => {
+            onAuctionCreated();
+            setAccountOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

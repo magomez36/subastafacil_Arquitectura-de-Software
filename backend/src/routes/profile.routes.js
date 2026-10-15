@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const router = express.Router();
 
 const authenticateToken = require('../middleware/auth.middleware');
+const { closeExpiredAuctions } = require('../services/auctions.service');
 
 // Expresión SQL: la subasta se considera terminada si está cerrada o venció
 const ENDED_SQL = `(a.status = 'closed' OR a.ends_at <= NOW())`;
@@ -24,6 +25,7 @@ function handleError(res, error, message) {
 // Datos del usuario autenticado y sus estadísticas
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    await closeExpiredAuctions();
     const userResult = await pool.query(
       `SELECT id, full_name, email, role, created_at FROM users WHERE id = $1`,
       [req.user.id]
@@ -44,8 +46,7 @@ router.get('/', authenticateToken, async (req, res) => {
         (
           SELECT COUNT(*)
           FROM auctions a
-          INNER JOIN (${TOP_BID_SQL}) t ON t.auction_id = a.id
-          WHERE t.bidder_id = $1
+          WHERE a.winner_id = $1
             AND a.status <> 'cancelled'
             AND ${ENDED_SQL}
         )::INTEGER AS auctions_won
@@ -67,6 +68,7 @@ router.get('/', authenticateToken, async (req, res) => {
 // Historial de ofertas del usuario, la más reciente primero
 router.get('/bids', authenticateToken, async (req, res) => {
   try {
+    await closeExpiredAuctions();
     const result = await pool.query(
       `
       SELECT
@@ -103,6 +105,7 @@ router.get('/bids', authenticateToken, async (req, res) => {
 // Subastas publicadas por el usuario
 router.get('/auctions', authenticateToken, async (req, res) => {
   try {
+    await closeExpiredAuctions();
     const result = await pool.query(
       `
       SELECT
@@ -112,6 +115,9 @@ router.get('/auctions', authenticateToken, async (req, res) => {
         a.starting_price,
         COALESCE(MAX(b.amount), a.starting_price) AS current_price,
         COUNT(b.id)::INTEGER AS bids_count,
+        a.winner_id,
+        winner.full_name AS winner,
+        winner_bid.amount AS winning_amount,
         CASE
           WHEN a.status = 'cancelled' THEN 'cancelled'
           WHEN ${ENDED_SQL} THEN 'closed'
@@ -120,11 +126,18 @@ router.get('/auctions', authenticateToken, async (req, res) => {
         END AS status,
         a.starts_at,
         a.ends_at,
-        a.created_at
+        a.created_at,
+        a.closed_at
       FROM auctions a
       LEFT JOIN bids b ON b.auction_id = a.id
+      LEFT JOIN users winner ON winner.id = a.winner_id
+      LEFT JOIN LATERAL (
+        SELECT amount FROM bids
+        WHERE auction_id = a.id AND bidder_id = a.winner_id
+        ORDER BY amount DESC, created_at ASC, id ASC LIMIT 1
+      ) winner_bid ON TRUE
       WHERE a.seller_id = $1
-      GROUP BY a.id
+      GROUP BY a.id, winner.full_name, winner_bid.amount
       ORDER BY a.created_at DESC, a.id DESC
       `,
       [req.user.id]
@@ -140,6 +153,7 @@ router.get('/auctions', authenticateToken, async (req, res) => {
 // Subastas terminadas donde la oferta del usuario fue la más alta
 router.get('/won', authenticateToken, async (req, res) => {
   try {
+    await closeExpiredAuctions();
     const result = await pool.query(
       `
       SELECT
@@ -152,7 +166,7 @@ router.get('/won', authenticateToken, async (req, res) => {
       FROM auctions a
       INNER JOIN (${TOP_BID_SQL}) t ON t.auction_id = a.id
       INNER JOIN users u ON u.id = a.seller_id
-      WHERE t.bidder_id = $1
+      WHERE a.winner_id = $1
         AND a.status <> 'cancelled'
         AND ${ENDED_SQL}
       ORDER BY a.ends_at DESC, a.id DESC
